@@ -28,7 +28,11 @@ N_JELLIES = 7
 JELLY_HUES = np.array([[1.0, 0.45, 0.78], [0.72, 0.52, 1.0], [0.42, 0.90, 1.0],
                        [1.0, 0.68, 0.42], [0.55, 1.0, 0.80]])
 BELL_RAMP = RAMP(".,:;-~=+*oaeO0Q@")
+ARM_RAMP = RAMP(":;~=+*%&8")                    # the inside of the ruffled oral arms
+COOL = np.array([0.45, 0.65, 1.0])              # tentacles cool toward this at their tips
 HISTORY = 200                                   # how many past bell positions the tentacles can follow
+STRAND_STEP = 0.5                               # rows between the points that shape a strand
+LAG = 0.75                                      # history frames each point trails the one above it
 
 # the sea
 TOP, BOTTOM = np.array([8.0, 34.0, 66.0]), np.array([1.0, 5.0, 15.0])   # water, surface to floor (0..255)
@@ -123,9 +127,9 @@ class Sea:
     def new_jelly(self, anywhere):
         rng = self.jelly_rng
         size = rng.uniform(2.8, 6.5)                                    # bell height, rows
-        n = int(rng.integers(4, 7))
-        u = np.concatenate([np.linspace(-0.8, 0.8, n) + rng.uniform(-0.08, 0.08, n), [-0.14, 0.14]])  # where each hangs
-        length = np.concatenate([rng.uniform(1.3, 2.6, n), rng.uniform(1.6, 2.2, 2)]) * size
+        n = int(3 + size * 0.9 + rng.integers(0, 2))                    # fine threads round the rim, 2 oral arms
+        u = np.concatenate([np.linspace(-0.92, 0.92, n) + rng.uniform(-0.05, 0.05, n), [-0.13, 0.13]])
+        length = np.concatenate([rng.uniform(1.6, 3.2, n), rng.uniform(1.5, 2.1, 2)]) * size
         j = dict(size=size, x=rng.uniform(0.08, 0.92) * self.cols,
                  y=rng.uniform(0.2, 0.95) * self.rows if anywhere else self.rows + size + 3,
                  rate=rng.uniform(0.35, 0.6), off=rng.random(), drift=rng.uniform(0, TAU),
@@ -183,28 +187,99 @@ class Sea:
         x = (p["x"] + 0.3 * np.sin(t * 0.3 + p["phase"])) % self.cols
         f.dots(p["y"][lit], x[lit], np.where(b[lit] > 0.5, G("*"), G("+")), PLANKTON * (0.3 + b[lit, None]))
 
+    @staticmethod
+    def strand_path(hist, u, length, ph, t, sway, wave):
+        # the points that shape one strand: each trails where its spot on the rim was a moment ago,
+        # with a wave running down it that grows toward the tip
+        n = max(4, int(length / STRAND_STEP))
+        k = np.arange(n)
+        s = k / (n - 1)
+        lag = np.minimum((k * LAG).astype(int), HISTORY - 1)
+        x = hist[lag, 0] + u * hist[lag, 2] * 0.95
+        x = x + sway * (0.4 + 2.2 * s) * s ** 0.8 * np.sin(t * wave - k * STRAND_STEP * 0.38 + ph)
+        y = hist[lag, 1] + 0.45 + k * STRAND_STEP
+        p = np.pad(x, 2, mode="edge")                                   # soften the per-frame steps of the history
+        return (p[:-4] + 2 * p[1:-3] + 3 * p[2:-2] + 2 * p[3:-1] + p[4:]) / 9, y
+
+    @staticmethod
+    def trace(x, y):
+        # walk a strand finely and give each cell it crosses the stroke that follows it:
+        # | / \ - by direction, and ( ) where a hanging stretch curves
+        d = np.maximum(np.abs(np.diff(x)), np.abs(np.diff(y)))
+        along = np.concatenate([[0.0], np.cumsum(d)])
+        m = max(12, int(along[-1] * 3))
+        q = np.linspace(0, along[-1], m)
+        xs, ys = np.interp(q, along, x), np.interp(q, along, y)
+        s = q / along[-1]
+        gx, gy = np.gradient(xs), np.gradient(ys)
+        steep = np.abs(gx * CW) < 0.42 * np.abs(gy * CH)
+        slope = gx / np.where(np.abs(gy) > 1e-6, gy, 1e-6)              # columns per row
+        bend = np.zeros(m)
+        bend[4:-4] = slope[8:] - slope[:-8]                             # < 0 bulges right ), > 0 bulges left (
+        glyph = stroke_for(gx * CW, -gy * CH)
+        glyph = np.where(steep, np.where(bend < -0.5, G(")"), np.where(bend > 0.5, G("("), G("|"))), glyph)
+        r, c = np.floor(ys).astype(int), np.floor(xs).astype(int)
+        new = np.ones(m, bool)
+        new[1:] = (r[1:] != r[:-1]) | (c[1:] != c[:-1])                 # one letter per cell crossed
+        return r[new], c[new], glyph[new], s[new]
+
+    @staticmethod
+    def thread_look(f, j, r, c, glyph, s, pulse_at, squeeze_, salt):
+        # a fine thread: solid strokes by the bell thinning to : and . at the tip, a few stinger beads
+        n = len(s)
+        bead = ((np.arange(n) + salt) % 9 == 0) & (s > 0.25) & (s < 0.75)
+        glyph = np.where((glyph == G("|")) & (s > 0.62), G(":"), glyph)
+        glyph = np.where(bead, G("o"), glyph)
+        glyph[-1] = G(".")
+        hue = j["hue"] + (COOL - j["hue"]) * (0.45 * s)[:, None]
+        col = hue * (j["dim"] * (0.95 - 0.55 * s) * (0.85 + 0.25 * squeeze_))[:, None]
+        col = np.where(bead[:, None], col * 1.35, col)
+        glow = np.exp(-((s - pulse_at) / 0.07) ** 2) * j["dim"]
+        f.dots(r, c, glyph, col + (1 - col) * (0.6 * glow)[:, None])
+
+    def draw_arm(self, f, j, x, y, ph, t, pulse_at, squeeze_):
+        # an oral arm: a ribbon a few letters wide with ruffled { } ( ) edges, narrowing to its tip
+        rows = np.arange(int(np.ceil(y[0])), int(y[-1]))
+        if len(rows) == 0:
+            return
+        mid = np.interp(rows + 0.5, y, x)
+        s = (rows + 0.5 - y[0]) / (y[-1] - y[0])
+        ruff = np.sin(s * 11 - t * 2.2 + ph)
+        half = (0.9 + 0.55 * ruff) * (1 - 0.65 * s) * (0.5 + 0.5 * j["size"] / 4.5)
+        pale = j["hue"] + (1 - j["hue"]) * 0.25
+        glow = np.exp(-((s - pulse_at) / 0.08) ** 2) * j["dim"]
+        cells = []
+        for row, xc, hw, rf, sv, gl in zip(rows, mid, half, ruff, s, glow):
+            left, right = int(np.floor(xc - hw + 0.5)), int(np.floor(xc + hw + 0.5))
+            edge = pale * j["dim"] * (1.0 - 0.45 * sv) * (0.85 + 0.25 * squeeze_)
+            edge = edge + (1 - edge) * 0.6 * gl
+            if right <= left:                                           # down to a single curl near the tip
+                cells.append((row, left, G(")") if rf > 0 else G("("), edge))
+                continue
+            curly = rf > 0.35
+            cells += [(row, left, G("{") if curly else G("("), edge), (row, right, G("}") if curly else G(")"), edge)]
+            for cc in range(left + 1, right):                           # the folds inside
+                lum = 0.7 - 0.45 * sv + 0.2 * np.sin(cc * 1.7 + row * 0.9 + ph)
+                inner = j["hue"] * j["dim"] * (0.45 + 0.4 * lum) * (0.85 + 0.25 * squeeze_)
+                cells.append((row, cc, int(ramp_pick(ARM_RAMP, lum, 0)), inner + (1 - inner) * 0.5 * gl))
+        r, c, g, col = zip(*cells)
+        f.dots(r, c, np.array(g), np.array(col))
+
     def draw_jelly(self, f, j, t):
         c, size = j["c"], j["size"]
         hist = np.array(j["hist"][::-1])                                # newest first
 
-        # tentacles: each point follows where the rim was a moment ago, swaying more toward the tip
-        for u, length, ph, frilly in zip(j["u"], j["length"], j["phase"], j["frilly"]):
-            n = max(3, int(length / 0.8))
-            k = np.arange(n)
-            lag = np.minimum((k * 1.1).astype(int), HISTORY - 1)
-            sway = (0.6 + 0.10 * k) * (k / n) ** 0.8 * np.sin(t * 1.4 - k * 0.3 + ph) * (1.5 if frilly else 1.0)
-            x = hist[lag, 0] + u * hist[lag, 2] * 0.92 + sway
-            y = hist[lag, 1] + 0.4 + k * 0.8
-            dx, dy = np.diff(x, append=2 * x[-1] - x[-2]), np.diff(y, append=2 * y[-1] - y[-2])
-            if frilly:                                                  # the frilly arms in the middle: ( ) { }
-                bend = np.sin(t * 1.4 - k * 0.3 + ph) > 0
-                glyph = np.where(k % 3 == 0, np.where(bend, G("}"), G("{")), np.where(bend, G(")"), G("(")))
-            else:                                                       # fine threads: : where they hang straight
-                glyph = stroke_for(dx * CW, -dy * CH)
-                glyph = np.where(glyph == G("|"), np.where(k % 2 == 0, G(":"), G("'")), glyph)
-            glyph = np.where(k == n - 1, G("."), glyph)
-            fade = (0.95 if frilly else 0.65) - (0.45 if frilly else 0.5) * k / n
-            f.dots(y, x, glyph, j["hue"] * (j["dim"] * fade * (0.85 + 0.3 * c))[:, None], move=True)
+        # a pulse of light leaves the bell on each squeeze and runs down every strand
+        pulse_at = ((t * j["rate"] + j["off"]) % 1.0) * 1.6
+        threads = [s for s in zip(j["u"], j["length"], j["phase"], j["frilly"]) if not s[3]]
+        arms = [s for s in zip(j["u"], j["length"], j["phase"], j["frilly"]) if s[3]]
+        for i, (u, length, ph, _) in enumerate(threads):                # fine threads, behind the arms
+            x, y = self.strand_path(hist, u, length, ph, t, 1.0, 1.4)
+            r, cc, glyph, s = self.trace(x, y)
+            self.thread_look(f, j, r, cc, glyph, s, pulse_at, c, salt=i * 4)
+        for u, length, ph, _ in arms:
+            x, y = self.strand_path(hist, u, length, ph, t, 1.3, 0.9)
+            self.draw_arm(f, j, x, y, ph, t, pulse_at, c)
 
         # the bell: a dome with a scalloped skirt, squeezed narrow and tall on each beat
         x, y = j["x"], j["y"]
