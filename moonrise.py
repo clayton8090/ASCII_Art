@@ -188,11 +188,14 @@ class Canvas:
         self.surface = pygame.Surface(self.size)
         self.glow_cells = pygame.Surface((cols, rows))
 
-    def render(self, char, col):
+    def render(self, char, col, backdrop=None):
+        # backdrop: an optional (h, w, 3) image in 0..255 laid under the letters
         rows, cols, ch, cw = self.rows, self.cols, self.ch, self.cw
         col = np.clip(col, 0, 1.25).astype(np.float32)
         px = self.masks[char][..., None] * col[:, :, None, None, :]     # rows, cols, ch, cw, rgb
         img = px.transpose(0, 2, 1, 3, 4).reshape(rows * ch, cols * cw, 3) * 255
+        if backdrop is not None:
+            img += backdrop
 
         # the glow: each cell's light spread over its neighbours, then stretched smoothly over the pixels
         light = col * self.ink[char][..., None]
@@ -427,15 +430,15 @@ class Moonrise:
         return out
 
 
-def main():
-    pygame.init()
-    show = Moonrise(int(sys.argv[1]) if len(sys.argv) > 1 else None)
+def run(show, title, loop=None, name="shot"):
+    # the window for any show with .canvas, .seed, .build() and .draw(t): keys, pacing, screenshots;
+    # loop: seconds before t starts over (None runs on forever)
     full = show.canvas.size
     info = pygame.display.Info()
     k = min(1.0, 0.9 * info.current_h / full[1], 0.95 * info.current_w / full[0]) if info.current_h > 0 else 1.0
     view = (int(full[0] * k), int(full[1] * k))
     window = pygame.display.set_mode(view)
-    pygame.display.set_caption(TITLE)
+    pygame.display.set_caption(title)
     clock = pygame.time.Clock()
     t, paused, running = 0.0, False, True
     picture = show.draw(t)
@@ -454,15 +457,22 @@ def main():
                     show.build()
                     t = 0.0
                 elif e.key == pygame.K_s:
-                    pygame.image.save(picture, str(HERE / f"moonrise_{show.seed}_{int(time.time())}.png"))
+                    pygame.image.save(picture, str(HERE / f"{name}_{show.seed}_{int(time.time())}.png"))
         step = clock.tick(FPS) / 1000
         if not paused:
-            t = (t + min(step, 2 / FPS)) % LOOP
+            t += min(step, 2 / FPS)
+            if loop is not None:
+                t %= loop
             picture = show.draw(t)
         window.blit(picture if view == full else pygame.transform.smoothscale(picture, view), (0, 0))
         pygame.display.flip()
     pygame.quit()
     return 0
+
+
+def main():
+    pygame.init()
+    return run(Moonrise(int(sys.argv[1]) if len(sys.argv) > 1 else None), TITLE, LOOP, "moonrise")
 
 
 if __name__ == "__main__":
