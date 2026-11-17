@@ -60,10 +60,7 @@ python3 scene.py [seed] [width] [height]
   matters (`/` to `\`, `^` to `v`) and broken by drifting streaks, with glints under the moon.
 - **Jellyfish:** the bell is a dome with a scalloped skirt that squeezes narrow and tall on each
   beat, which pushes it up. Each tentacle point follows where the rim was a moment ago, so the
-  strands stream and settle as the bell pulses. Threads are traced cell by cell so they never
-  break: `| / \` by direction, `( )` where they curve, thinning to `:` and `.` at the tip, with
-  stinger beads along them. The oral arms are ruffled ribbons with `{ }` edges, and a pulse of
-  light runs down every strand on each beat.
+  strands stream and settle as the bell pulses.
 - **Sea:** the light rays are soft bands glowing behind the letters, the sand shimmers with moving
   caustics, and the fish are classic `><>` and `><((('>`.
 
