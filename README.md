@@ -1,6 +1,6 @@
 # ASCII Scenes
 
-Animated scenes drawn only in letters, by Clayton Aylor.
+Animated scenes drawn in ASCII, by Clayton Aylor.
 
 ```
 pip install -r requirements.txt
