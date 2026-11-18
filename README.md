@@ -10,10 +10,6 @@ pip install -r requirements.txt
 
 ![Moonrise in ASCII](images/preview.png)
 
-A big orange moon climbs out from behind three ranges of mountains, cooling to white as it rises.
-Its light catches the slopes that face it, drowns the stars near it and lays a path of glints across
-the lake, where everything above is mirrored in rippling letters. Now and then a shooting star
-crosses the sky, and the water. Every seed draws a new landscape.
 
 ```
 python moonrise.py          # a random landscape
@@ -26,10 +22,6 @@ Space pause · R restart · N new landscape · S screenshot · Esc quit
 
 ![Jellyfish in ASCII](images/jellyfish.png)
 
-Jellyfish pulse their way up through the water: each squeeze of the bell pushes it up, and its
-fine threads and frilly arms stream behind it. Light rays slant down from the rippling surface,
-marine snow drifts, plankton flicker, bubbles wander up from vents in the sand, kelp sways on the
-sea floor and schools of fish swim past. Every seed makes a new sea.
 
 ```
 python jellyfish.py         # a random sea
